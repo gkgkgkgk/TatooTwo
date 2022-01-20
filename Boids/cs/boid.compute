@@ -1,0 +1,76 @@
+﻿#pragma kernel CSMain
+#define GROUP_SIZE 256
+
+#include "UnityCG.cginc"
+
+struct Boid
+{
+	float3 position;
+	float3 direction;
+};
+
+RWStructuredBuffer<Boid> boidBuffer;
+
+CBUFFER_START(Params)
+	float DeltaTime;
+	float RotationSpeed;
+	float BoidSpeed;
+	uint BoidsCount;
+	float cohesionWeight;
+    float avoidanceWeight;
+    float alignmentWeight;
+CBUFFER_END
+
+[numthreads(GROUP_SIZE,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	Boid b = boidBuffer[id.x];
+    float3 cohesion = float3(0,0,0);
+    float3 avoidance = float3(0,0,0);
+    float3 alignment = float3(0,0,0);
+
+    int amtC = 0;
+    int amtA = 0;
+
+    for(int i = 0; i < BoidsCount; i++){
+        if(i != int(id.x)) {
+            Boid b2 = boidBuffer[i];
+            float3 diff = b.position - b2.position;
+
+            if(distance(b2.position, b.position) < 4.0f){
+                float d = length(diff);
+                if(d != 0.0f){
+                    avoidance += diff / d;
+                }
+            }
+
+            if(distance(b2.position, b.position) < 20.0f){
+                cohesion += b2.position;
+                amtC++;
+            }
+
+            if(distance(b2.position, b.position) < 20.0f){
+                alignment += b2.direction;
+                amtA++;
+            }
+        }
+    }
+
+    if(amtC > 0){cohesion /= amtC;}
+    cohesion = normalize(cohesion - b.position);
+
+    if(amtA > 0){alignment /= amtA;}
+
+	float3 dir = (cohesion * cohesionWeight) + (avoidance * avoidanceWeight) + ((alignment - b.direction) * alignmentWeight);
+    
+	float ip = exp(-RotationSpeed * DeltaTime);
+    
+    if(distance(b.position, float3(0,0,0)) > 50.0f){
+        b.direction -= (b.position) * 0.5f;
+    }
+
+    b.direction = lerp(dir, normalize(b.direction), ip);
+    b.position += (b.direction * BoidSpeed * DeltaTime);
+
+    boidBuffer[id.x] = b;
+}

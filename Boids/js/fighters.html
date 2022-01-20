@@ -1,0 +1,330 @@
+<head>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<canvas id="myCanvas" width="1000" height="1000" style="border:1px solid #000000;">
+</canvas>
+<div style="display: flex; align-content: space-between;">
+    <span>Amount of Squads</span><input type="range" min="1" max="20" value="5"
+        oninput="changeSquadAmount(this.value)" />
+    <span>Amount of Boids</span>
+    <input type="range" min="1" max="50" value="5" oninput="changeBoidAmount(this.value)" />
+    <button onclick="start()">Start</button>
+</div>
+
+<script>
+    var c = document.getElementById("myCanvas");
+    var ctx = c.getContext("2d");
+
+    let cohesionWeight = 0.005;
+    let alignmentWeight = 0.01;
+    let avoidenceWeight = 0.01;
+    let avoidenceRange = 20;
+
+    let squadAmount = 5;
+    let boidAmount = 5;
+
+    let bullets = [];
+
+    const changeSquadAmount = (a) => {
+        squadAmount = a;
+    };
+
+    const changeBoidAmount = (a) => {
+        boidAmount = a;
+    };
+
+    const initBoidSquadrons = (amountOfSquads, amountOfBoids) => {
+        let squads = [];
+        for (let i = 0; i < amountOfSquads; i++) {
+            let boids = [];
+            let color = '#' + Math.floor(Math.random() * 16777215).toString(16);
+            let leaderSteps = Math.floor(Math.random() * 10);
+
+            for (let j = 0; j < amountOfBoids; j++) {
+                let xPos = Math.random() * c.width;
+                let yPos = Math.random() * c.height;
+                let speed = 2;
+                let dx = Math.random() * 10;
+                let dy = Math.random() * 10;
+                let rot = Math.atan2(dy, dx);
+
+                boids.push({
+                    name: "boid" + i + ":" + j,
+                    squad: "squad" + i,
+                    x: xPos,
+                    y: yPos,
+                    dx: dx,
+                    dy: dy,
+                    rot: rot,
+                    speed: speed,
+                    color: color,
+                    fireRate: 20 + Math.floor(Math.random() * 100),
+                    fireCounter: Math.floor(Math.random() * 20),
+                });
+            }
+
+            let nearestSquad = i - 1;
+            if (i < 0) {
+                nearestSquad = amountOfSquads;
+            }
+
+            squads.push({
+                name: "squad" + i,
+                boids: boids,
+                nearestSquad: nearestSquad,
+                leaderSteps: leaderSteps,
+                currentSteps: 0,
+                dead: false
+            });
+        }
+
+        return squads;
+    }
+
+    const drawBoid = (boid) => {
+        ctx.save();
+        ctx.translate(boid.x, boid.y);
+        ctx.rotate(Math.atan2(boid.dy, boid.dx));
+        ctx.fillStyle = boid.color;
+        ctx.strokeStyle = boid.color;
+        ctx.beginPath();
+        ctx.moveTo(-3, 3);
+        ctx.lineTo(-3, -3);
+        ctx.lineTo(5, 0);
+
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    const drawBullet = (bullet) => {
+        ctx.save();
+        ctx.translate(bullet.x, bullet.y);
+        ctx.fillStyle = bullet.color;
+        ctx.strokeStyle = bullet.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, 2, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    const distance = (boid1, boid2) => {
+        return Math.sqrt(Math.pow(boid1.x - boid2.x, 2) + Math.pow(boid1.y - boid2.y, 2));
+    }
+
+    const cohesion = (boid, boidLeader) => {
+        let cohesionX = boidLeader.x;
+        let cohesionY = boidLeader.y;
+
+        boid.dx += ((cohesionX - boid.x) * cohesionWeight);
+        boid.dy += ((cohesionY - boid.y) * cohesionWeight);
+    }
+
+    const avoidence = (boid, boids) => {
+        let avoidenceX = 0;
+        let avoidenceY = 0;
+
+        for (let i = 0; i < boids.length; i++) {
+            if (distance(boid, boids[i]) < avoidenceRange && boid.name != boids[i].name) {
+                avoidenceX += boid.x - boids[i].x;
+                avoidenceY += boid.y - boids[i].y;
+
+            }
+        }
+
+        boid.dx += avoidenceX * avoidenceWeight;
+        boid.dy += avoidenceY * avoidenceWeight;
+    }
+
+    const alignment = (boid, leader) => {
+        let avgdx = leader.dx;
+        let avgdy = leader.dy;
+
+        boid.dx += ((avgdx - boid.dx) * alignmentWeight);
+        boid.dy += ((avgdy - boid.dy) * alignmentWeight);
+    }
+
+    const normalizeSpeed = (boid) => {
+        let speed = Math.sqrt(Math.pow(boid.dx, 2) + Math.pow(boid.dy, 2));
+        if (speed > boid.speed) {
+            boid.dx *= boid.speed / speed;
+            boid.dy *= boid.speed / speed;
+        }
+    }
+
+    const dontLeave = (boid) => {
+        const bounds = 100;
+
+        if (boid.x < bounds) {
+            boid.dx += 1;
+        }
+        else if (boid.x > c.width - bounds) {
+            boid.dx -= 1;
+        }
+
+        if (boid.y < bounds) {
+            boid.dy += 1;
+        }
+        else if (boid.y > c.height - bounds) {
+            boid.dy -= 1;
+        }
+    }
+
+    const fire = (boid) => {
+        let bullet = {
+            boid: boid,
+            dx: boid.dx,
+            dy: boid.dy,
+            x: boid.x,
+            y: boid.y,
+            speed: 5,
+            color: boid.color
+        }
+
+        let speed = Math.sqrt(Math.pow(bullet.dx, 2) + Math.pow(bullet.dy, 2));
+        bullet.dx /= speed;
+        bullet.dy /= speed;
+
+        bullets.push(bullet);
+    }
+
+    const processBoid = (boid, boids) => {
+        cohesion(boid, boids[0]);
+        avoidence(boid, allBoids);
+        alignment(boid, boids[0]);
+        normalizeSpeed(boid);
+        dontLeave(boid);
+
+        if (boid.fireCounter > boid.fireRate) {
+            boid.fireCounter = 0;
+            fire(boid);
+        }
+        else {
+            boid.fireCounter++;
+        }
+
+        boid.x += boid.dx;
+        boid.y += boid.dy;
+        boid.rot = rad2deg(Math.atan2(boid.dy, boid.dx));
+    }
+
+    const processSquadLeader = (squad) => {
+        squad.currentSteps++;
+        if (squad.currentSteps > squad.leaderSteps) {
+            let nearestSquad = 0;
+
+            let nearestPos = {
+                x: 10000,
+                y: 10000
+            };
+
+            for (let i = 0; i < squads.length; i++) {
+                if (squad.name != squads[i].name) {
+                    let avgPosX = 0;
+                    let avgPosY = 0;
+                    let amt = 0;
+
+                    for (let j = 0; j < squads[i].boids.length; j++) {
+                        avgPosX += squads[i].boids[j].x;
+                        avgPosY += squads[i].boids[j].y;
+                        amt++;
+                    }
+
+                    avgPosX = avgPosX / amt;
+                    avgPosY = avgPosY / amt;
+
+                    if (distance({ x: avgPosX, y: avgPosY }, squad.boids[0]) < distance({ x: nearestPos.x, y: nearestPos.y }, squad.boids[0])) {
+                        nearestPos = { x: avgPosX, y: avgPosY };
+                        squad.nearestSquad = squads[i];
+                    }
+                }
+            }
+
+            squad.boids[0].dx += ((nearestPos.x - squad.boids[0].x) * cohesionWeight);
+            squad.boids[0].dy += ((nearestPos.y - squad.boids[0].y) * cohesionWeight);
+            squad.currentSteps = 0;
+        }
+
+        dontLeave(squad.boids[0]);
+        normalizeSpeed(squad.boids[0]);
+        squad.boids[0].x += squad.boids[0].dx;
+        squad.boids[0].y += squad.boids[0].dy;
+    }
+
+    const processBullet = (bullet, i) => {
+        bullet.x += bullet.dx * bullet.speed;
+        bullet.y += bullet.dy * bullet.speed;
+
+        if (bullet.x > c.width || bullet.x < 0 || bullet.y > c.height || bullet.y < 0) {
+            bullets.splice(i, 1);
+        }
+
+        for (let j = 0; j < squads.length; j++) {
+            if (bullet.boid.squad != squads[j].name) {
+                for (let k = 1; k < squads[j].boids.length; k++) {
+                    if (distance(bullet, squads[j].boids[k]) < 3) {
+                        bullets.splice(i, 1);
+                        squads[j].boids.splice(k, 1);
+                    }
+                }
+            }
+        }
+    }
+
+    const rad2deg = (rad) => {
+        return rad * 180 / Math.PI;
+    }
+
+    const deg2rad = (deg) => {
+        return deg * Math.PI / 180;
+    }
+
+    var squads = [];
+    var allBoids = [];
+
+
+
+    const start = () => {
+        allBoids = [];
+        squads = [];
+        squads = initBoidSquadrons(squadAmount, boidAmount);
+        for (let i = 0; i < squads.length; i++) {
+            for (let j = 0; j < squads[i].boids.length; j++) {
+                allBoids.push(squads[i].boids[j]);
+            }
+        }
+    }
+
+    const loop = () => {
+        ctx.clearRect(0, 0, c.width, c.height);
+        for (let i = 0; i < squads.length; i++) {
+            if (!squads[i].dead) {
+                processSquadLeader(squads[i]);
+                drawBoid(squads[i].boids[0]);
+                if (squads[i].boids.length == 1) {
+                    squads[i].dead = true;
+                }
+                for (let j = 1; j < squads[i].boids.length; j++) {
+                    if (squads[i].boids[j]) {
+                        processBoid(squads[i].boids[j], squads[i].boids);
+                        drawBoid(squads[i].boids[j]);
+                    }
+                }
+            }
+        }
+
+        for (let i = 0; i < bullets.length; i++) {
+            if (bullets[i]) {
+                drawBullet(bullets[i]);
+                processBullet(bullets[i], i);
+            }
+        }
+
+        window.requestAnimationFrame(loop);
+    }
+
+    window.requestAnimationFrame(loop);
+
+</script>
